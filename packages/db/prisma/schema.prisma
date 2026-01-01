@@ -6,43 +6,43 @@
 
 generator client {
   provider = "prisma-client"
-  output   = "../generated/prisma"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-
-
-
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String?
-  photo     String?
-  rooms     Room[]
-  chats     Chat[]
-  createdAt DateTime @default(now())
+  id       String  @id @default(uuid())
+  email    String  @unique
+  password String
+  name     String?
+
+  rooms Room[]
+  chats Chat[]
 }
+
 model Room {
   id        Int      @id @default(autoincrement())
   slug      String   @unique
   createdAt DateTime @default(now())
   adminId   String
-  admin     User    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  admin     User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
   chats     Chat[]
+
   @@index([adminId])
 }
+
 model Chat {
   id        Int      @id @default(autoincrement())
   message   String
   roomId    Int
   userId    String
-  room      Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+
   @@index([roomId])
   @@index([userId])
 }

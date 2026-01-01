@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "@repo/backend-common/config";
 import { middleware, signupLimiter } from "./middleware";
 import { UserSchema, LoginSchema, RoomSchema } from "@repo/common/type";
-import  {prisma}  from "@repo/db";
+  import  {prisma}  from "@repo/db";
 import bcrypt from "bcrypt";
 
 const app = express();
@@ -46,6 +46,7 @@ app.post("/signin", (req, res) => {
       message: "Invalid inputs",
     });
   }
+  
   const userId = 1;
   const token = jwt.sign(
     {
