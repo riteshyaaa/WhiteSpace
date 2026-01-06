@@ -14,7 +14,7 @@ app.use(express.json());
 
 app.post("/signup", async (req, res) => {
   const parsed = UserSchema.safeParse(req.body);
-  console.log(parsed);
+  
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid input" });
   }
@@ -42,7 +42,7 @@ app.post("/signup", async (req, res) => {
 
 app.post("/signin", async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body);
-  console.log(parsed);
+  
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid credentials" });
   }
@@ -97,8 +97,9 @@ app.post("/room", middleware, async (req, res) => {
   }
 });
 
-app.get("/chats/:roomId", async (req, res) => {
+app.get("/chat/:roomId", async (req, res) => {
   const roomId = Number(req.params.roomId);
+
 
   const messages = await prisma.chat.findMany({
     where: {
@@ -113,6 +114,21 @@ app.get("/chats/:roomId", async (req, res) => {
     messages
   })
 });
+
+app.get("/room/:slug", async(req, res) => {
+  const slug =  req.params.slug;
+  
+  const room =  await prisma.room.findFirst({
+    where:{
+      slug
+    }
+  })
+  const roomId = room?.id;
+
+  res.json({
+    roomId
+  })
+})
 
 app.listen(PORT, () => {
   console.log(`HTTP Server listening on port ${PORT}`);

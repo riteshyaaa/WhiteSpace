@@ -29,18 +29,26 @@ function checkUser(token: string): string | null {
 }
 
 wss.on("connection", function connection(ws, request) {
-  const url = request.url;
+  // const url = request.url;
 
-  if (!url) {
-    return;
-  }
+  // if (!url) {
+  //   return;
+  // }
+  // const queryParams = new URLSearchParams(url.split("?")[1]);
+  // const token = queryParams.get("token");
+  // if (!token) {
+  //   ws.close(1008, "Authentication token missing");
+  //   return;
+  // }
+  const fullUrl = new URL(request.url!, "http://localhost:8081"); // base required
 
-  const queryParams = new URLSearchParams(url.split("?")[1]);
-  const token = queryParams.get("token");
-  if (!token) {
-    ws.close(1008, "Authentication token missing");
-    return;
-  }
+  const token = fullUrl.searchParams.get("token");
+
+  if (!token || token.length > 500) {
+  ws.close(1008, "Invalid token");
+  return;
+}
+
   const userId = checkUser(token);
   if (userId == null) {
     ws.close();
@@ -93,7 +101,6 @@ wss.on("connection", function connection(ws, request) {
         return;
       }
 
-     
       await prisma.chat.create({
         data: {
           roomId,
@@ -102,7 +109,7 @@ wss.on("connection", function connection(ws, request) {
         },
       });
 
- //send message to everyone who are in that room
+      //send message to everyone who are in that room
       users.forEach((u) => {
         if (u.rooms.includes(parseData.roomId)) {
           u.ws.send(
