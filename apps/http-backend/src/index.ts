@@ -6,6 +6,7 @@ import { UserSchema, LoginSchema, RoomSchema } from "@repo/common/type";
 import { prisma } from "@repo/db";
 import bcrypt from "bcrypt";
 
+
 const app = express();
 const PORT = 3001;
 
@@ -41,32 +42,27 @@ app.post("/signup", async (req, res) => {
 
 app.post("/signin", async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body);
-  console.log(parsed)
+  console.log(parsed);
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid credentials" });
   }
 
   const { email, password } = parsed.data;
-  
 
   const user = await prisma.user.findUnique({
-    where: { email }
+    where: { email },
   });
 
   if (!user) {
     return res.status(401).json({ message: "Invalid credentials" });
-  } 
+  }
 
   const isValid = await bcrypt.compare(password, user.password);
   if (!isValid) {
     return res.status(401).json({ message: "Invalid credentials" });
   }
 
-  const token = jwt.sign(
-    { userId: user.id },
-    JWT_SECRET,
-    { expiresIn: "1d" }
-  );
+  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "1d" });
 
   res.json({ token });
 });
@@ -91,7 +87,7 @@ app.post("/room", middleware, async (req, res) => {
       },
     });
 
-     res.status(201).json({ roomId: room.id });
+    res.status(201).json({ roomId: room.id });
   } catch (e: any) {
     if (e.code === "P2002") {
       return res.status(409).json({ message: "Room already exists" });
@@ -99,6 +95,23 @@ app.post("/room", middleware, async (req, res) => {
     console.error(e);
     res.status(500).json({ message: "Internal server error" });
   }
+});
+
+app.get("/chats/:roomId", async (req, res) => {
+  const roomId = Number(req.params.roomId);
+
+  const messages = await prisma.chat.findMany({
+    where: {
+      roomId,
+    },
+    orderBy: {
+      id: "desc",
+    },
+    take: 50,
+  });
+  res.json({
+    messages
+  })
 });
 
 app.listen(PORT, () => {
