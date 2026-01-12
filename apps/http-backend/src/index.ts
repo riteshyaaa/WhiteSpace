@@ -5,9 +5,11 @@ import { middleware, signupLimiter } from "./middleware";
 import { UserSchema, LoginSchema, RoomSchema } from "@repo/common/type";
 import { prisma } from "@repo/db";
 import bcrypt from "bcrypt";
+import cors from "cors"
 
 
 const app = express();
+app.use(cors())
 const PORT = 3001;
 
 app.use(express.json());

@@ -45,9 +45,9 @@ wss.on("connection", function connection(ws, request) {
   const token = fullUrl.searchParams.get("token");
 
   if (!token || token.length > 500) {
-  ws.close(1008, "Invalid token");
-  return;
-}
+    ws.close(1008, "Invalid token");
+    return;
+  }
 
   const userId = checkUser(token);
   if (userId == null) {
@@ -85,6 +85,7 @@ wss.on("connection", function connection(ws, request) {
     if (parseData.type == "chat") {
       const roomId = parseData.roomId;
       const message = parseData.message;
+     
       const user = users.find((x) => x.ws === ws);
 
       if (!user) return;
@@ -103,7 +104,7 @@ wss.on("connection", function connection(ws, request) {
 
       await prisma.chat.create({
         data: {
-          roomId,
+          roomId: Number(roomId),
           message,
           userId,
         },
