@@ -1,4 +1,5 @@
 import { Pencil, Zap, Users, Download, Share2, Lock, Grid, Palette } from 'lucide-react';
+import Link from 'next/link';
 
 function App() {
   return (
@@ -14,9 +15,10 @@ function App() {
               <a href="#features" className="text-gray-600 hover:text-gray-900 transition">Features</a>
               <a href="#about" className="text-gray-600 hover:text-gray-900 transition">About</a>
               <a href="#" className="text-gray-600 hover:text-gray-900 transition">Docs</a>
-              <button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+              <Link href={"/signin"}><button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
                 Start Drawing
               </button>
+              </Link>
             </div>
           </div>
         </div>
@@ -189,9 +191,11 @@ function App() {
                   Used by teams at leading companies worldwide to visualize ideas, collaborate remotely,
                   and bring concepts to life.
                 </p>
+              
                 <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition font-medium">
                   Get Started Free
                 </button>
+               
               </div>
               <div className="grid grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">

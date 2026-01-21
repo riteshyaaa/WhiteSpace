@@ -1,7 +1,7 @@
 import { BACKEND_URL } from "@/config";
 import axios from "axios";
-
-import { parse } from "path";
+import { MutableRefObject } from "react";
+import { Tool } from "@/context/ToolContext";
 
 type Shape =
   | {
@@ -21,14 +21,15 @@ type Shape =
 export default async function InitializeCanvas(
   canvas: HTMLCanvasElement,
   roomId: string,
-  socket: WebSocket
+  socket: WebSocket,
+  selectedToolRef: MutableRefObject<Tool>,
 ) {
   const ctx = canvas.getContext("2d");
 
   if (!ctx) {
     return;
   }
-
+ 
   const existingShapes: Shape[] = await getExistingShapes(roomId);
 
   socket.onmessage = (event) => {
@@ -59,20 +60,27 @@ export default async function InitializeCanvas(
     const width = e.clientX - startX;
     const height = e.clientY - startY;
 
-    const shape: Shape = {
-      type: "rect",
-      x: startX,
-      y: startY,
-      width,
-      height,
-    };
-    existingShapes.push({
-      type: "rect",
-      x: startX,
-      y: startY,
-      width,
-      height,
-    });
+    let shape: Shape;
+    if (selectedToolRef.current === "rect") {
+      shape = {
+        type: "rect",
+        x: startX,
+        y: startY,
+        width,
+        height,
+      };
+    } else {
+      const centerX = startX + width / 2;
+      const centerY = startY + height / 2;
+      const radius = Math.max(Math.abs(width), Math.abs(height)) / 2;
+      shape = {
+        type: "circle",
+        centerX,
+        centerY,
+        radius,
+      };
+    }
+    existingShapes.push(shape);
     socket.send(
       JSON.stringify({
         type: "chat",
@@ -80,7 +88,7 @@ export default async function InitializeCanvas(
           shape,
         }),
         roomId,
-      })
+      }),
     );
   });
 
@@ -89,18 +97,32 @@ export default async function InitializeCanvas(
 
     const width = e.clientX - startX;
     const height = e.clientY - startY;
+
     clearCanvas(existingShapes, canvas, ctx);
 
     ctx.strokeStyle = "rgb(255, 255, 255)";
+    const tool = selectedToolRef.current;
 
-    ctx?.strokeRect(startX, startY, width, height);
+    if (tool === "rect") {
+      console.log("selected tool is", tool);
+      ctx?.strokeRect(startX, startY, width, height);
+    } else if (tool === "circle") {
+      const centerX = startX + width / 2;
+      const centerY = startY + height / 2;
+
+      const radius = Math.max(Math.abs(width), Math.abs(height)) / 2;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.closePath();
+    }
   });
 }
 
 function clearCanvas(
   existingShapes: Shape[],
   canvas: HTMLCanvasElement,
-  ctx: CanvasRenderingContext2D
+  ctx: CanvasRenderingContext2D,
 ) {
   ctx?.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = "rgb(0, 0, 0)";
@@ -112,6 +134,12 @@ function clearCanvas(
       ctx.strokeStyle = "rgb(255, 255, 255)";
 
       ctx?.strokeRect(shape.x, shape.y, shape.width, shape.height);
+    } else if (shape.type === "circle") {
+      ctx.strokeStyle = "rgb(255, 255, 255)";
+      ctx.beginPath();
+      ctx.arc(shape.centerX, shape.centerY, shape.radius, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.closePath();
     }
   });
 }

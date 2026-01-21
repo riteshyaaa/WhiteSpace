@@ -85,7 +85,7 @@ wss.on("connection", function connection(ws, request) {
     if (parseData.type == "chat") {
       const roomId = parseData.roomId;
       const message = parseData.message;
-     
+
       const user = users.find((x) => x.ws === ws);
 
       if (!user) return;

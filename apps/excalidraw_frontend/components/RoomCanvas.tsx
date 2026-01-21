@@ -9,7 +9,7 @@ export default function ROOMCanvas({ roomId }: { roomId: string }) {
 
   useEffect(() => {
     const ws = new WebSocket(
-      `${WS_URL}?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxZDFiNWNkZi0xZjQ2LTRlNGYtOTRjMS0xOGYwN2NiZTZlMjUiLCJpYXQiOjE3NjgyMTY2OTMsImV4cCI6MTc2ODMwMzA5M30.cX86AqYTR2yJFZev_UJbEdHVPB230hs2oaVvx2xaVH8`
+      `${WS_URL}?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxZDFiNWNkZi0xZjQ2LTRlNGYtOTRjMS0xOGYwN2NiZTZlMjUiLCJpYXQiOjE3NjkwMjIxMDEsImV4cCI6MTc2OTEwODUwMX0.XwLE99mfjEnJV0w9gFtWGe_7dGrKwIKg4N4Ns23aetY`
     );
 
     ws.onopen = () => {
