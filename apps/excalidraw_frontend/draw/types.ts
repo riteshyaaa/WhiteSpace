@@ -90,6 +90,30 @@ export interface StickyShape extends BaseShape {
   fontSize: number;
 }
 
+export interface EntityField {
+  name: string;
+  type: string;
+  pk?: boolean;
+  fk?: boolean;
+}
+
+export interface EntityShape extends BaseShape {
+  type: "entity";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  name: string;
+  fields: EntityField[];
+}
+
+export interface RelationShape extends BaseShape {
+  type: "relation";
+  fromId: string;
+  toId: string;
+  label?: string;
+}
+
 export type Shape =
   | RectShape
   | EllipseShape
@@ -97,7 +121,13 @@ export type Shape =
   | ArrowShape
   | PencilShape
   | TextShape
-  | StickyShape;
+  | StickyShape
+  | EntityShape
+  | RelationShape;
+
+export const ENTITY_HEADER_H = 30;
+export const ENTITY_ROW_H = 22;
+export const ENTITY_WIDTH = 220;
 
 /**
  * Operations sent over the wire (and persisted) so every client can

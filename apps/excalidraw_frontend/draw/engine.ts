@@ -5,6 +5,8 @@ import {
   BackgroundMode,
   DEFAULT_STYLE,
   DrawOp,
+  ENTITY_HEADER_H,
+  ENTITY_ROW_H,
   GRID_SIZE,
   RemoteCursor,
   Shape,
@@ -13,6 +15,7 @@ import {
   Style,
   Tool,
 } from "./types";
+import { parsePrismaSchema, schemaToShapes } from "./erd";
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -164,6 +167,26 @@ export class CanvasEngine {
   setCursorIdentity(name: string, color: string): void {
     this.cursorName = name;
     this.cursorColor = color;
+  }
+
+  /**
+   * Parse a Prisma schema, lay it out as an ERD, and add the shapes.
+   * Returns the number of entities generated (0 if nothing parsed).
+   */
+  generateERD(schemaText: string): number {
+    const parsed = parsePrismaSchema(schemaText);
+    if (parsed.entities.length === 0) return 0;
+    const origin = this.screenToWorld(80, 130);
+    const shapes = schemaToShapes(parsed, origin.x, origin.y);
+    if (shapes.length === 0) return 0;
+    const redo: DrawOp[] = shapes.map((shape) => ({ op: "add", shape }));
+    const undo: DrawOp[] = shapes.map((shape) => ({ op: "delete", id: shape.id }));
+    this.commit(redo, undo);
+    this.selectedIds = new Set(
+      shapes.filter((s) => s.type === "entity").map((s) => s.id)
+    );
+    this.zoomToFit();
+    return parsed.entities.length;
   }
 
   undo(): void {
@@ -880,6 +903,10 @@ export class CanvasEngine {
     if (s.type === "line" || s.type === "arrow") {
       return { ...s, id, x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy };
     }
+    if (s.type === "relation") {
+      // Relations follow their entities; just clone with a new id.
+      return { ...s, id };
+    }
     return { ...s, id, x: s.x + dx, y: s.y + dy };
   }
 
@@ -999,13 +1026,23 @@ export class CanvasEngine {
   }
 
   private shapeHit(s: Shape, w: Pt, t: number): boolean {
-    if (s.type === "rect" || s.type === "ellipse" || s.type === "sticky") {
+    if (
+      s.type === "rect" ||
+      s.type === "ellipse" ||
+      s.type === "sticky" ||
+      s.type === "entity"
+    ) {
       return (
         w.x >= s.x - t &&
         w.x <= s.x + s.width + t &&
         w.y >= s.y - t &&
         w.y <= s.y + s.height + t
       );
+    }
+    if (s.type === "relation") {
+      const ep = this.relationEndpoints(s);
+      if (!ep) return false;
+      return this.distToSegment(w, ep.x1, ep.y1, ep.x2, ep.y2) <= t + s.strokeWidth;
     }
     if (s.type === "line" || s.type === "arrow") {
       return this.distToSegment(w, s.x1, s.y1, s.x2, s.y2) <= t + s.strokeWidth;
@@ -1397,8 +1434,103 @@ export class CanvasEngine {
       });
     } else if (s.type === "sticky") {
       this.drawSticky(ctx, s);
+    } else if (s.type === "entity") {
+      this.drawEntity(ctx, s);
+    } else if (s.type === "relation") {
+      const ep = this.relationEndpoints(s);
+      if (ep) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = s.stroke;
+        ctx.lineWidth = s.strokeWidth;
+        ctx.beginPath();
+        ctx.moveTo(ep.x1, ep.y1);
+        ctx.lineTo(ep.x2, ep.y2);
+        ctx.stroke();
+        ctx.fillStyle = s.stroke;
+        for (const p of [
+          [ep.x1, ep.y1],
+          [ep.x2, ep.y2],
+        ]) {
+          ctx.beginPath();
+          ctx.arc(p[0]!, p[1]!, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
     ctx.setLineDash([]);
+  }
+
+  private drawEntity(
+    ctx: CanvasRenderingContext2D,
+    e: Extract<Shape, { type: "entity" }>
+  ): void {
+    ctx.setLineDash([]);
+    // Body
+    ctx.fillStyle = e.fill === "transparent" ? "#1b1b1b" : e.fill;
+    ctx.fillRect(e.x, e.y, e.width, e.height);
+    // Header bar
+    ctx.fillStyle = e.stroke;
+    ctx.fillRect(e.x, e.y, e.width, ENTITY_HEADER_H);
+    ctx.fillStyle = "#0b0b0b";
+    ctx.font = "bold 14px sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(e.name, e.x + 10, e.y + ENTITY_HEADER_H / 2);
+
+    // Fields
+    ctx.font = "12px sans-serif";
+    e.fields.forEach((f, i) => {
+      const midY = e.y + ENTITY_HEADER_H + i * ENTITY_ROW_H + ENTITY_ROW_H / 2;
+      const tag = f.pk ? "PK" : f.fk ? "FK" : "";
+      if (tag) {
+        ctx.fillStyle = f.pk ? "#ffd43b" : "#4dabf7";
+        ctx.textAlign = "left";
+        ctx.fillText(tag, e.x + 8, midY);
+      }
+      ctx.fillStyle = "#e9ecef";
+      ctx.textAlign = "left";
+      ctx.fillText(f.name, e.x + 34, midY);
+      ctx.fillStyle = "#868e96";
+      ctx.textAlign = "right";
+      ctx.fillText(f.type, e.x + e.width - 10, midY);
+    });
+
+    ctx.textAlign = "left";
+    ctx.strokeStyle = e.stroke;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(e.x, e.y, e.width, e.height);
+  }
+
+  private entityClipPoint(
+    e: Extract<Shape, { type: "entity" }>,
+    toward: Pt
+  ): Pt {
+    const cx = e.x + e.width / 2;
+    const cy = e.y + e.height / 2;
+    const dx = toward.x - cx;
+    const dy = toward.y - cy;
+    if (dx === 0 && dy === 0) return { x: cx, y: cy };
+    const hw = e.width / 2;
+    const hh = e.height / 2;
+    const sx = dx !== 0 ? hw / Math.abs(dx) : Infinity;
+    const sy = dy !== 0 ? hh / Math.abs(dy) : Infinity;
+    const k = Math.min(sx, sy);
+    return { x: cx + dx * k, y: cy + dy * k };
+  }
+
+  private relationEndpoints(
+    rel: Extract<Shape, { type: "relation" }>
+  ): { x1: number; y1: number; x2: number; y2: number } | null {
+    const from = this.shapes.get(rel.fromId);
+    const to = this.shapes.get(rel.toId);
+    if (!from || from.type !== "entity" || !to || to.type !== "entity") {
+      return null;
+    }
+    const fromCenter = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+    const toCenter = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+    const p1 = this.entityClipPoint(from, toCenter);
+    const p2 = this.entityClipPoint(to, fromCenter);
+    return { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
   }
 
   private drawSticky(
@@ -1527,8 +1659,23 @@ export class CanvasEngine {
   private shapeBounds(
     s: Shape
   ): { x: number; y: number; w: number; h: number } | null {
-    if (s.type === "rect" || s.type === "ellipse" || s.type === "sticky") {
+    if (
+      s.type === "rect" ||
+      s.type === "ellipse" ||
+      s.type === "sticky" ||
+      s.type === "entity"
+    ) {
       return { x: s.x, y: s.y, w: s.width, h: s.height };
+    }
+    if (s.type === "relation") {
+      const ep = this.relationEndpoints(s);
+      if (!ep) return null;
+      return {
+        x: Math.min(ep.x1, ep.x2),
+        y: Math.min(ep.y1, ep.y2),
+        w: Math.abs(ep.x2 - ep.x1),
+        h: Math.abs(ep.y2 - ep.y1),
+      };
     }
     if (s.type === "line" || s.type === "arrow") {
       return {
@@ -1733,6 +1880,51 @@ export class CanvasEngine {
     if (s.type === "text") {
       const escaped = this.escapeXml(s.text);
       return `<text x="${s.x}" y="${s.y + s.fontSize}" font-size="${s.fontSize}" font-family="sans-serif" fill="${s.stroke}">${escaped}</text>`;
+    }
+    if (s.type === "entity") {
+      const parts: string[] = [];
+      parts.push(
+        `<rect x="${s.x}" y="${s.y}" width="${s.width}" height="${s.height}" fill="${
+          s.fill === "transparent" ? "#1b1b1b" : s.fill
+        }" stroke="${s.stroke}"/>`
+      );
+      parts.push(
+        `<rect x="${s.x}" y="${s.y}" width="${s.width}" height="${ENTITY_HEADER_H}" fill="${s.stroke}"/>`
+      );
+      parts.push(
+        `<text x="${s.x + 10}" y="${
+          s.y + ENTITY_HEADER_H / 2 + 5
+        }" font-size="14" font-weight="bold" font-family="sans-serif" fill="#0b0b0b">${this.escapeXml(
+          s.name
+        )}</text>`
+      );
+      s.fields.forEach((f, i) => {
+        const midY = s.y + ENTITY_HEADER_H + i * ENTITY_ROW_H + ENTITY_ROW_H / 2 + 4;
+        const tag = f.pk ? "PK" : f.fk ? "FK" : "";
+        if (tag) {
+          parts.push(
+            `<text x="${s.x + 8}" y="${midY}" font-size="12" font-family="sans-serif" fill="${
+              f.pk ? "#ffd43b" : "#4dabf7"
+            }">${tag}</text>`
+          );
+        }
+        parts.push(
+          `<text x="${s.x + 34}" y="${midY}" font-size="12" font-family="sans-serif" fill="#e9ecef">${this.escapeXml(
+            f.name
+          )}</text>`
+        );
+        parts.push(
+          `<text x="${s.x + s.width - 10}" y="${midY}" font-size="12" text-anchor="end" font-family="sans-serif" fill="#868e96">${this.escapeXml(
+            f.type
+          )}</text>`
+        );
+      });
+      return `<g>${parts.join("")}</g>`;
+    }
+    if (s.type === "relation") {
+      const ep = this.relationEndpoints(s);
+      if (!ep) return "";
+      return `<line x1="${ep.x1}" y1="${ep.y1}" x2="${ep.x2}" y2="${ep.y2}" stroke="${s.stroke}" stroke-width="${s.strokeWidth}"/>`;
     }
     return "";
   }

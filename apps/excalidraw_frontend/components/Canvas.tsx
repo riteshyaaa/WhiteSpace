@@ -20,6 +20,7 @@ import {
   Download,
   Grid3x3,
   Magnet,
+  Database,
 } from "lucide-react";
 import { CanvasEngine } from "@/draw/engine";
 import {
@@ -70,6 +71,9 @@ export default function Canvas({
   const [canRedo, setCanRedo] = useState(false);
   const [background, setBackground] = useState<BackgroundMode>("dots");
   const [snap, setSnap] = useState(false);
+  const [erdOpen, setErdOpen] = useState(false);
+  const [schemaText, setSchemaText] = useState("");
+  const [erdError, setErdError] = useState<string | null>(null);
 
   // Create the engine once per (room, socket).
   useEffect(() => {
@@ -127,6 +131,17 @@ export default function Canvas({
 
   const cycleBackground = () => {
     setBackground((b) => (b === "dots" ? "grid" : b === "grid" ? "blank" : "dots"));
+  };
+
+  const handleGenerateErd = () => {
+    const count = engineRef.current?.generateERD(schemaText) ?? 0;
+    if (count > 0) {
+      setErdOpen(false);
+      setSchemaText("");
+      setErdError(null);
+    } else {
+      setErdError("No Prisma `model` blocks found. Paste a valid schema.prisma.");
+    }
   };
 
   return (
@@ -279,6 +294,14 @@ export default function Canvas({
         >
           <Download size={16} /> SVG
         </button>
+        <div className="mx-1 h-6 w-px bg-zinc-600" />
+        <button
+          title="Generate ERD from a Prisma schema"
+          onClick={() => setErdOpen(true)}
+          className="flex h-9 items-center gap-1 rounded-lg px-2 text-zinc-300 hover:bg-zinc-700"
+        >
+          <Database size={16} /> ERD
+        </button>
       </div>
 
       {/* Zoom + canvas aids (bottom left) */}
@@ -331,6 +354,50 @@ export default function Canvas({
           <Magnet size={16} />
         </button>
       </div>
+
+      {/* ERD generator modal */}
+      {erdOpen && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+          <div className="flex w-full max-w-2xl flex-col gap-3 rounded-2xl bg-zinc-900 p-5 text-zinc-200 shadow-2xl">
+            <div className="flex items-center gap-2 text-lg font-semibold">
+              <Database size={18} /> Schema → ERD
+            </div>
+            <p className="text-xs text-zinc-400">
+              Paste a <code className="text-zinc-300">schema.prisma</code>. Each{" "}
+              <code className="text-zinc-300">model</code> becomes an editable
+              entity; <code className="text-zinc-300">@relation</code> fields become
+              connections. The generated shapes are normal canvas objects you can
+              move and restyle.
+            </p>
+            <textarea
+              value={schemaText}
+              onChange={(e) => setSchemaText(e.target.value)}
+              spellCheck={false}
+              placeholder={`model User {\n  id    String @id @default(uuid())\n  email String @unique\n  posts Post[]\n}\n\nmodel Post {\n  id       Int    @id @default(autoincrement())\n  title    String\n  author   User   @relation(fields: [authorId], references: [id])\n  authorId String\n}`}
+              className="h-64 w-full resize-none rounded-lg border border-zinc-700 bg-zinc-950 p-3 font-mono text-xs text-zinc-100 outline-none focus:border-blue-500"
+            />
+            {erdError && <p className="text-sm text-red-400">{erdError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setErdOpen(false);
+                  setErdError(null);
+                }}
+                className="rounded-lg px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGenerateErd}
+                disabled={!schemaText.trim()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+              >
+                Generate ERD
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
