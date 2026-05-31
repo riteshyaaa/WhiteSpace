@@ -10,6 +10,7 @@ import {
   Square,
   Circle,
   Type,
+  StickyNote,
   Eraser,
   Undo2,
   Redo2,
@@ -17,9 +18,17 @@ import {
   ZoomOut,
   Maximize,
   Download,
+  Grid3x3,
+  Magnet,
 } from "lucide-react";
 import { CanvasEngine } from "@/draw/engine";
-import { DEFAULT_STYLE, Style, Tool } from "@/draw/types";
+import {
+  BackgroundMode,
+  DEFAULT_STYLE,
+  Style,
+  StrokeStyle,
+  Tool,
+} from "@/draw/types";
 import { getMe, colorFromId } from "@/lib/user";
 
 const TOOLS: { tool: Tool; icon: React.ReactNode; label: string; key: string }[] =
@@ -32,11 +41,17 @@ const TOOLS: { tool: Tool; icon: React.ReactNode; label: string; key: string }[]
     { tool: "rect", icon: <Square size={18} />, label: "Rectangle", key: "R" },
     { tool: "ellipse", icon: <Circle size={18} />, label: "Ellipse", key: "O" },
     { tool: "text", icon: <Type size={18} />, label: "Text", key: "T" },
+    { tool: "sticky", icon: <StickyNote size={18} />, label: "Sticky note", key: "S" },
     { tool: "eraser", icon: <Eraser size={18} />, label: "Eraser", key: "E" },
   ];
 
 const STROKE_COLORS = ["#f8f9fa", "#ff6b6b", "#51cf66", "#4dabf7", "#ffd43b", "#cc5de8"];
 const FILL_COLORS = ["transparent", "#ff6b6b", "#51cf66", "#4dabf7", "#ffd43b", "#cc5de8"];
+const STROKE_STYLES: { value: StrokeStyle; label: string }[] = [
+  { value: "solid", label: "──" },
+  { value: "dashed", label: "- -" },
+  { value: "dotted", label: "···" },
+];
 
 export default function Canvas({
   roomId,
@@ -53,6 +68,8 @@ export default function Canvas({
   const [zoom, setZoom] = useState(100);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [background, setBackground] = useState<BackgroundMode>("dots");
+  const [snap, setSnap] = useState(false);
 
   // Create the engine once per (room, socket).
   useEffect(() => {
@@ -75,6 +92,8 @@ export default function Canvas({
       },
     });
     engineRef.current = engine;
+    engine.setBackground(background);
+    engine.setSnapToGrid(snap);
     engine.init();
 
     getMe().then((me) => {
@@ -87,9 +106,9 @@ export default function Canvas({
       engine.destroy();
       engineRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, socket]);
 
-  // Push tool / style changes into the engine.
   useEffect(() => {
     engineRef.current?.setTool(tool);
   }, [tool]);
@@ -97,6 +116,18 @@ export default function Canvas({
   useEffect(() => {
     engineRef.current?.setStyle(style);
   }, [style]);
+
+  useEffect(() => {
+    engineRef.current?.setBackground(background);
+  }, [background]);
+
+  useEffect(() => {
+    engineRef.current?.setSnapToGrid(snap);
+  }, [snap]);
+
+  const cycleBackground = () => {
+    setBackground((b) => (b === "dots" ? "grid" : b === "grid" ? "blank" : "dots"));
+  };
 
   return (
     <div style={{ height: "100vh", overflow: "hidden", position: "relative" }}>
@@ -155,11 +186,28 @@ export default function Canvas({
                 className={`flex h-6 w-6 items-center justify-center rounded border text-[10px] ${
                   style.fill === c ? "border-blue-400" : "border-zinc-600"
                 }`}
-                style={{
-                  background: c === "transparent" ? "transparent" : c,
-                }}
+                style={{ background: c === "transparent" ? "transparent" : c }}
               >
                 {c === "transparent" ? "∅" : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1 font-medium text-zinc-400">Stroke style</div>
+          <div className="flex gap-1">
+            {STROKE_STYLES.map((ss) => (
+              <button
+                key={ss.value}
+                onClick={() => setStyle((s) => ({ ...s, strokeStyle: ss.value }))}
+                className={`flex-1 rounded border py-1 font-mono ${
+                  style.strokeStyle === ss.value
+                    ? "border-blue-400 bg-zinc-700 text-white"
+                    : "border-zinc-600 hover:bg-zinc-700"
+                }`}
+              >
+                {ss.label}
               </button>
             ))}
           </div>
@@ -233,7 +281,7 @@ export default function Canvas({
         </button>
       </div>
 
-      {/* Zoom controls (bottom left) */}
+      {/* Zoom + canvas aids (bottom left) */}
       <div className="fixed bottom-3 left-3 flex items-center gap-1 rounded-xl bg-zinc-800/95 p-1.5 text-zinc-300 shadow-lg backdrop-blur">
         <button
           title="Zoom out"
@@ -263,6 +311,24 @@ export default function Canvas({
           className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-zinc-700"
         >
           <Maximize size={16} />
+        </button>
+        <button
+          title={`Background: ${background} (click to cycle)`}
+          onClick={cycleBackground}
+          className={`flex h-8 w-8 items-center justify-center rounded-lg hover:bg-zinc-700 ${
+            background !== "blank" ? "text-blue-400" : ""
+          }`}
+        >
+          <Grid3x3 size={16} />
+        </button>
+        <button
+          title="Snap to grid"
+          onClick={() => setSnap((s) => !s)}
+          className={`flex h-8 w-8 items-center justify-center rounded-lg hover:bg-zinc-700 ${
+            snap ? "bg-blue-600 text-white" : ""
+          }`}
+        >
+          <Magnet size={16} />
         </button>
       </div>
     </div>
