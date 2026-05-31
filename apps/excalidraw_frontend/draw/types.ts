@@ -7,12 +7,18 @@ export type Tool =
   | "rect"
   | "ellipse"
   | "text"
+  | "sticky"
   | "eraser";
+
+export type StrokeStyle = "solid" | "dashed" | "dotted";
+
+export type BackgroundMode = "blank" | "grid" | "dots";
 
 export interface Style {
   stroke: string;
   fill: string; // "transparent" for no fill
   strokeWidth: number;
+  strokeStyle: StrokeStyle;
   fontSize: number;
 }
 
@@ -26,6 +32,7 @@ interface BaseShape {
   stroke: string;
   fill: string;
   strokeWidth: number;
+  strokeStyle: StrokeStyle;
 }
 
 export interface RectShape extends BaseShape {
@@ -73,13 +80,24 @@ export interface TextShape extends BaseShape {
   fontSize: number;
 }
 
+export interface StickyShape extends BaseShape {
+  type: "sticky";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  fontSize: number;
+}
+
 export type Shape =
   | RectShape
   | EllipseShape
   | LineShape
   | ArrowShape
   | PencilShape
-  | TextShape;
+  | TextShape
+  | StickyShape;
 
 /**
  * Operations sent over the wire (and persisted) so every client can
@@ -103,5 +121,9 @@ export const DEFAULT_STYLE: Style = {
   stroke: "#f8f9fa",
   fill: "transparent",
   strokeWidth: 2,
+  strokeStyle: "solid",
   fontSize: 20,
 };
+
+export const STICKY_DEFAULT_FILL = "#ffd43b";
+export const GRID_SIZE = 20;
