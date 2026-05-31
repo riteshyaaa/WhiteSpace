@@ -7,7 +7,9 @@ import {
   DrawOp,
   ENTITY_HEADER_H,
   ENTITY_ROW_H,
+  FloatingReaction,
   GRID_SIZE,
+  LaserPoint,
   RemoteCursor,
   Shape,
   STICKY_DEFAULT_FILL,
@@ -37,6 +39,8 @@ export interface EngineCallbacks {
   onToolChange?: (tool: Tool) => void;
   onViewChange?: (zoomPercent: number) => void;
   onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
+  /** Fires when someone in the room starts/stops presenting (null = nobody). */
+  onPresenterChange?: (presenter: { userId: string; name: string } | null) => void;
 }
 
 type Mode = "idle" | "drawing" | "panning" | "moving" | "selecting";
@@ -85,6 +89,19 @@ export class CanvasEngine {
   private cursorColor = "#1971c2";
   private lastCursorSent = 0;
 
+  // --- Real-time collaboration (ephemeral) ---
+  private laserTrails = new Map<string, LaserPoint[]>();
+  private reactions: FloatingReaction[] = [];
+  private lastLaserSent = 0;
+  private lastPointerScreen: Pt = { x: 0, y: 0 };
+  private chatInput: HTMLInputElement | null = null;
+  private presenting = false;
+  private lastViewportSent = 0;
+  private following: string | null = null;
+  private presenter: { userId: string; name: string } | null = null;
+  private lastViewportAt = 0;
+  private animationFrame: number | null = null;
+
   private cursorPruneTimer: ReturnType<typeof setInterval> | null = null;
   private textEditor: HTMLTextAreaElement | null = null;
   private destroyed = false;
@@ -117,7 +134,45 @@ export class CanvasEngine {
     this.destroyed = true;
     this.detachListeners();
     if (this.cursorPruneTimer) clearInterval(this.cursorPruneTimer);
+    if (this.animationFrame !== null) cancelAnimationFrame(this.animationFrame);
     this.removeTextEditor();
+    this.removeChatInput();
+  }
+
+  // ---------- Collaboration: public API ----------
+
+  /** Toggle presenting; while on, the local viewport is broadcast to the room. */
+  setPresenting(on: boolean): void {
+    this.presenting = on;
+    if (on) this.broadcastViewport(true);
+  }
+
+  isPresenting(): boolean {
+    return this.presenting;
+  }
+
+  /** Follow a presenter's viewport (or pass null to stop following). */
+  setFollowing(userId: string | null): void {
+    this.following = userId;
+  }
+
+  isFollowing(): boolean {
+    return this.following !== null;
+  }
+
+  /** Broadcast a floating emoji reaction at the local cursor position. */
+  sendReaction(emoji: string): void {
+    const w = this.screenToWorld(
+      this.lastPointerScreen.x || this.canvas.width / 2,
+      this.lastPointerScreen.y || this.canvas.height / 2
+    );
+    this.spawnReaction(emoji, w.x, w.y, this.cursorColor);
+    this.sendEphemeral({ type: "reaction", emoji, x: w.x, y: w.y });
+  }
+
+  /** Open the ephemeral cursor-chat input near the local cursor. */
+  openCursorChat(): void {
+    this.startChatInput();
   }
 
   // ---------- Public API ----------
@@ -355,6 +410,7 @@ export class CanvasEngine {
     if (data.type === "cursor") {
       const from = data.from as string | undefined;
       if (!from) return;
+      const existing = this.remoteCursors.get(from);
       this.remoteCursors.set(from, {
         userId: from,
         name: (data.name as string) || "Anonymous",
@@ -362,8 +418,72 @@ export class CanvasEngine {
         x: Number(data.x) || 0,
         y: Number(data.y) || 0,
         lastSeen: Date.now(),
+        chat: existing?.chat,
+        chatAt: existing?.chatAt,
       });
       this.render();
+      return;
+    }
+
+    if (data.type === "laser") {
+      const from = data.from as string | undefined;
+      if (!from) return;
+      this.addLaserPoint(from, Number(data.x) || 0, Number(data.y) || 0);
+      this.ensureAnimating();
+      return;
+    }
+
+    if (data.type === "reaction") {
+      const from = (data.from as string) || "";
+      this.spawnReaction(
+        (data.emoji as string) || "👍",
+        Number(data.x) || 0,
+        Number(data.y) || 0,
+        this.remoteCursors.get(from)?.color || "#1971c2"
+      );
+      return;
+    }
+
+    if (data.type === "cursor_chat") {
+      const from = data.from as string | undefined;
+      if (!from) return;
+      const c = this.remoteCursors.get(from);
+      const text = (data.text as string) || "";
+      if (c) {
+        c.chat = text || undefined;
+        c.chatAt = Date.now();
+        c.lastSeen = Date.now();
+      } else {
+        this.remoteCursors.set(from, {
+          userId: from,
+          name: (data.name as string) || "Anonymous",
+          color: (data.color as string) || "#1971c2",
+          x: Number(data.x) || 0,
+          y: Number(data.y) || 0,
+          lastSeen: Date.now(),
+          chat: text || undefined,
+          chatAt: Date.now(),
+        });
+      }
+      this.render();
+      return;
+    }
+
+    if (data.type === "viewport") {
+      const from = data.from as string | undefined;
+      if (!from) return;
+      const changed = !this.presenter || this.presenter.userId !== from;
+      this.presenter = { userId: from, name: (data.name as string) || "Someone" };
+      this.lastViewportAt = Date.now();
+      if (changed) this.callbacks.onPresenterChange?.(this.presenter);
+      if (this.following === from) {
+        this.scale = Number(data.scale) || this.scale;
+        this.offsetX = Number(data.offsetX) || 0;
+        this.offsetY = Number(data.offsetY) || 0;
+        this.callbacks.onViewChange?.(Math.round(this.scale * 100));
+        this.render();
+      }
+      return;
     }
   };
 
@@ -525,6 +645,7 @@ export class CanvasEngine {
       text: "text",
       sticky: "copy",
       eraser: "cell",
+      laser: "crosshair",
     };
     this.canvas.style.cursor = this.spaceHeld ? "grab" : map[this.tool];
   }
@@ -539,6 +660,13 @@ export class CanvasEngine {
       this.panStart = sp;
       this.panOrigin = { x: this.offsetX, y: this.offsetY };
       this.canvas.style.cursor = "grabbing";
+      this.stopFollowing();
+      return;
+    }
+
+    // Laser is a transient pointer, not a shape tool.
+    if (this.tool === "laser") {
+      this.emitLaser(w);
       return;
     }
 
@@ -641,11 +769,19 @@ export class CanvasEngine {
   private onMouseMove = (e: MouseEvent): void => {
     const sp = this.canvasPoint(e);
     const w = this.screenToWorld(sp.x, sp.y);
+    this.lastPointerScreen = sp;
     this.maybeSendCursor(w);
+    this.moveChatInput();
+
+    if (this.tool === "laser") {
+      // Emit a trail point while the laser tool is active (even without a press).
+      this.emitLaser(w);
+    }
 
     if (this.mode === "panning") {
       this.offsetX = this.panOrigin.x + (sp.x - this.panStart.x);
       this.offsetY = this.panOrigin.y + (sp.y - this.panStart.y);
+      this.broadcastViewport();
       this.render();
       return;
     }
@@ -750,12 +886,14 @@ export class CanvasEngine {
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
     const sp = this.canvasPoint(e);
+    this.stopFollowing();
     if (e.ctrlKey || e.metaKey) {
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       this.zoomAt(sp.x, sp.y, factor);
     } else {
       this.offsetX -= e.deltaX;
       this.offsetY -= e.deltaY;
+      this.broadcastViewport();
       this.render();
     }
   };
@@ -814,6 +952,20 @@ export class CanvasEngine {
       }
       return;
     }
+    if (e.key === "/") {
+      // Cursor chat (Figma-style).
+      e.preventDefault();
+      this.startChatInput();
+      return;
+    }
+    if (e.key === "Escape") {
+      if (this.tool === "laser") {
+        this.setTool("select");
+        this.callbacks.onToolChange?.("select");
+      }
+      this.stopFollowing();
+      return;
+    }
     if (e.code === "Space" && !this.spaceHeld) {
       this.spaceHeld = true;
       this.updateCursorStyle();
@@ -831,6 +983,7 @@ export class CanvasEngine {
       t: "text",
       s: "sticky",
       e: "eraser",
+      x: "laser",
     };
     const tool = shortcuts[e.key.toLowerCase()];
     if (tool) {
@@ -1240,9 +1393,182 @@ export class CanvasEngine {
       if (now - c.lastSeen > 5000) {
         this.remoteCursors.delete(id);
         changed = true;
+      } else if (c.chat && c.chatAt && now - c.chatAt > 8000) {
+        c.chat = undefined;
+        changed = true;
       }
     }
+    // A presenter who stops broadcasting is cleared after a grace period.
+    if (this.presenter && now - this.lastViewportAt > 6000) {
+      this.presenter = null;
+      this.following = null;
+      this.callbacks.onPresenterChange?.(null);
+    }
     if (changed) this.render();
+  }
+
+  // ---------- Collaboration: ephemeral senders & effects ----------
+
+  private sendEphemeral(payload: Record<string, unknown>): void {
+    if (this.socket.readyState !== WebSocket.OPEN) return;
+    this.socket.send(JSON.stringify({ ...payload, roomId: this.roomId }));
+  }
+
+  private broadcastViewport(force = false): void {
+    if (!this.presenting) return;
+    const now = Date.now();
+    if (!force && now - this.lastViewportSent < 60) return;
+    this.lastViewportSent = now;
+    this.sendEphemeral({
+      type: "viewport",
+      scale: this.scale,
+      offsetX: this.offsetX,
+      offsetY: this.offsetY,
+      name: this.cursorName,
+    });
+  }
+
+  private stopFollowing(): void {
+    if (this.following !== null) {
+      this.following = null;
+      this.callbacks.onPresenterChange?.(this.presenter);
+    }
+  }
+
+  private emitLaser(w: Pt): void {
+    this.addLaserPoint("__self__", w.x, w.y);
+    this.ensureAnimating();
+    const now = Date.now();
+    if (now - this.lastLaserSent < 40) return;
+    this.lastLaserSent = now;
+    this.sendEphemeral({
+      type: "laser",
+      x: w.x,
+      y: w.y,
+      name: this.cursorName,
+      color: this.cursorColor,
+    });
+  }
+
+  private addLaserPoint(key: string, x: number, y: number): void {
+    const trail = this.laserTrails.get(key) ?? [];
+    trail.push({ x, y, t: Date.now() });
+    this.laserTrails.set(key, trail);
+  }
+
+  private spawnReaction(emoji: string, x: number, y: number, color: string): void {
+    this.reactions.push({ id: uid(), emoji, x, y, start: Date.now(), color });
+    this.ensureAnimating();
+  }
+
+  /** Runs a RAF loop only while transient effects (laser/reactions) are alive. */
+  private ensureAnimating(): void {
+    if (this.animationFrame !== null || this.destroyed) return;
+    const tick = () => {
+      const alive = this.pruneTransient();
+      this.render();
+      if (alive && !this.destroyed) {
+        this.animationFrame = requestAnimationFrame(tick);
+      } else {
+        this.animationFrame = null;
+      }
+    };
+    this.animationFrame = requestAnimationFrame(tick);
+  }
+
+  /** Drop expired laser points / reactions. Returns true if any remain. */
+  private pruneTransient(): boolean {
+    const now = Date.now();
+    const LASER_MS = 700;
+    const REACTION_MS = 1600;
+    let alive = false;
+
+    for (const [key, trail] of this.laserTrails) {
+      const kept = trail.filter((p) => now - p.t < LASER_MS);
+      if (kept.length) {
+        this.laserTrails.set(key, kept);
+        alive = true;
+      } else {
+        this.laserTrails.delete(key);
+      }
+    }
+
+    this.reactions = this.reactions.filter((r) => now - r.start < REACTION_MS);
+    if (this.reactions.length) alive = true;
+
+    return alive;
+  }
+
+  // ---------- Cursor chat input ----------
+
+  private startChatInput(): void {
+    if (this.chatInput) {
+      this.chatInput.focus();
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Say something…";
+    input.style.position = "fixed";
+    input.style.left = `${this.lastPointerScreen.x + rect.left + 14}px`;
+    input.style.top = `${this.lastPointerScreen.y + rect.top + 14}px`;
+    input.style.zIndex = "1500";
+    input.style.padding = "4px 8px";
+    input.style.borderRadius = "6px";
+    input.style.border = `2px solid ${this.cursorColor}`;
+    input.style.background = "#1e1e1e";
+    input.style.color = "#fff";
+    input.style.font = "13px sans-serif";
+    input.style.outline = "none";
+    document.body.appendChild(input);
+    input.focus();
+    this.chatInput = input;
+
+    const send = () => {
+      const w = this.screenToWorld(
+        this.lastPointerScreen.x,
+        this.lastPointerScreen.y
+      );
+      this.sendEphemeral({
+        type: "cursor_chat",
+        text: input.value,
+        x: w.x,
+        y: w.y,
+        name: this.cursorName,
+        color: this.cursorColor,
+      });
+    };
+
+    input.addEventListener("input", send);
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === "Escape") {
+        ev.preventDefault();
+        input.value = "";
+        send(); // clear the bubble for everyone
+        this.removeChatInput();
+      }
+    });
+    input.addEventListener("blur", () => {
+      input.value = "";
+      send();
+      this.removeChatInput();
+    });
+  }
+
+  private moveChatInput(): void {
+    if (!this.chatInput) return;
+    const rect = this.canvas.getBoundingClientRect();
+    this.chatInput.style.left = `${this.lastPointerScreen.x + rect.left + 14}px`;
+    this.chatInput.style.top = `${this.lastPointerScreen.y + rect.top + 14}px`;
+  }
+
+  private removeChatInput(): void {
+    if (this.chatInput) {
+      const el = this.chatInput;
+      this.chatInput = null;
+      el.remove();
+    }
   }
 
   // ---------- Text editing overlay ----------
@@ -1335,6 +1661,8 @@ export class CanvasEngine {
     }
     if (this.marquee) this.drawMarquee(ctx);
     this.drawGuides(ctx);
+    this.drawLaser(ctx);
+    this.drawReactions(ctx);
 
     // Screen-space overlays.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1342,6 +1670,58 @@ export class CanvasEngine {
       this.drawCursor(ctx, c);
     }
     this.drawMinimap(ctx);
+  }
+
+  private drawLaser(ctx: CanvasRenderingContext2D): void {
+    if (this.laserTrails.size === 0) return;
+    const now = Date.now();
+    const LASER_MS = 700;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.setLineDash([]);
+    for (const trail of this.laserTrails.values()) {
+      for (let i = 1; i < trail.length; i++) {
+        const a = trail[i - 1]!;
+        const b = trail[i]!;
+        const age = (now - b.t) / LASER_MS;
+        const alpha = Math.max(0, 1 - age);
+        ctx.strokeStyle = `rgba(255, 70, 70, ${alpha})`;
+        ctx.lineWidth = (4 / this.scale) * (0.5 + alpha * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+      const head = trail[trail.length - 1];
+      if (head) {
+        ctx.fillStyle = "rgba(255, 70, 70, 0.9)";
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, 5 / this.scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawReactions(ctx: CanvasRenderingContext2D): void {
+    if (this.reactions.length === 0) return;
+    const now = Date.now();
+    const REACTION_MS = 1600;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const r of this.reactions) {
+      const t = (now - r.start) / REACTION_MS;
+      const alpha = Math.max(0, 1 - t);
+      const rise = 60 * t; // world units upward
+      const size = (24 + 8 * t) / this.scale;
+      ctx.globalAlpha = alpha;
+      ctx.font = `${size}px sans-serif`;
+      ctx.fillText(r.emoji, r.x, r.y - rise);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D): void {
@@ -1731,7 +2111,40 @@ export class CanvasEngine {
     ctx.fillRect(p.x + 12, p.y + 12, w + 10, 18);
     ctx.fillStyle = "#fff";
     ctx.fillText(label, p.x + 17, p.y + 25);
+
+    // Cursor-chat bubble (ephemeral).
+    if (c.chat) {
+      ctx.font = "13px sans-serif";
+      const cw = ctx.measureText(c.chat).width;
+      const bx = p.x + 12;
+      const by = p.y + 34;
+      ctx.fillStyle = "rgba(20,20,20,0.92)";
+      ctx.strokeStyle = c.color;
+      ctx.lineWidth = 1.5;
+      this.roundRect(ctx, bx, by, cw + 16, 24, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.fillText(c.chat, bx + 8, by + 16);
+    }
     ctx.restore();
+  }
+
+  private roundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number
+  ): void {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
   }
 
   private drawMinimap(ctx: CanvasRenderingContext2D): void {
@@ -1949,6 +2362,7 @@ export class CanvasEngine {
 
   private emitView(): void {
     this.callbacks.onViewChange?.(Math.round(this.scale * 100));
+    this.broadcastViewport();
   }
 
   private emitHistory(): void {
