@@ -23,6 +23,13 @@ interface HistoryEntry {
   redo: DrawOp[];
 }
 
+interface Guide {
+  axis: "x" | "y";
+  pos: number;
+  start: number;
+  end: number;
+}
+
 export interface EngineCallbacks {
   onToolChange?: (tool: Tool) => void;
   onViewChange?: (zoomPercent: number) => void;
@@ -60,6 +67,7 @@ export class CanvasEngine {
   private moveOriginals = new Map<string, Shape>();
   private marquee: { x1: number; y1: number; x2: number; y2: number } | null =
     null;
+  private activeGuides: Guide[] = [];
 
   private clipboard: Shape[] = [];
   private pasteOffset = 0;
@@ -620,8 +628,18 @@ export class CanvasEngine {
     }
 
     if (this.mode === "moving" && this.selectedIds.size > 0) {
-      const dx = this.snap(w.x - this.startWorld.x);
-      const dy = this.snap(w.y - this.startWorld.y);
+      let dx = w.x - this.startWorld.x;
+      let dy = w.y - this.startWorld.y;
+      if (this.snapToGrid) {
+        dx = this.snap(dx);
+        dy = this.snap(dy);
+        this.activeGuides = [];
+      } else {
+        const align = this.computeAlignment(dx, dy);
+        dx += align.adjustX;
+        dy += align.adjustY;
+        this.activeGuides = align.guides;
+      }
       for (const id of this.selectedIds) {
         const shape = this.shapes.get(id);
         const orig = this.moveOriginals.get(id);
@@ -668,6 +686,7 @@ export class CanvasEngine {
         undo.push({ op: "update", shape: orig });
       }
       this.moveOriginals.clear();
+      this.activeGuides = [];
       this.mode = "idle";
       if (moved && redo.length) this.commit(redo, undo);
       return;
@@ -1043,6 +1062,98 @@ export class CanvasEngine {
     }
   }
 
+  private computeAlignment(
+    dx: number,
+    dy: number
+  ): { adjustX: number; adjustY: number; guides: Guide[] } {
+    const threshold = 6 / this.scale;
+
+    // Bounding box of the moving selection at the candidate offset.
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const orig of this.moveOriginals.values()) {
+      const b = this.shapeBounds(orig);
+      if (!b) continue;
+      minX = Math.min(minX, b.x + dx);
+      minY = Math.min(minY, b.y + dy);
+      maxX = Math.max(maxX, b.x + b.w + dx);
+      maxY = Math.max(maxY, b.y + b.h + dy);
+    }
+    if (minX === Infinity) return { adjustX: 0, adjustY: 0, guides: [] };
+
+    const movXs = [minX, (minX + maxX) / 2, maxX]; // left, center, right
+    const movYs = [minY, (minY + maxY) / 2, maxY]; // top, middle, bottom
+
+    let bestX: { adjust: number; line: number; dist: number } | null = null;
+    let bestY: { adjust: number; line: number; dist: number } | null = null;
+
+    for (const s of this.shapes.values()) {
+      if (this.selectedIds.has(s.id)) continue;
+      const b = this.shapeBounds(s);
+      if (!b) continue;
+      const txs = [b.x, b.x + b.w / 2, b.x + b.w];
+      const tys = [b.y, b.y + b.h / 2, b.y + b.h];
+      for (const tx of txs) {
+        for (const mx of movXs) {
+          const d = Math.abs(tx - mx);
+          if (d <= threshold && (!bestX || d < bestX.dist)) {
+            bestX = { adjust: tx - mx, line: tx, dist: d };
+          }
+        }
+      }
+      for (const ty of tys) {
+        for (const my of movYs) {
+          const d = Math.abs(ty - my);
+          if (d <= threshold && (!bestY || d < bestY.dist)) {
+            bestY = { adjust: ty - my, line: ty, dist: d };
+          }
+        }
+      }
+    }
+
+    const guides: Guide[] = [];
+    let adjustX = 0;
+    let adjustY = 0;
+
+    if (bestX) {
+      adjustX = bestX.adjust;
+      let s0 = minY;
+      let s1 = maxY;
+      for (const s of this.shapes.values()) {
+        if (this.selectedIds.has(s.id)) continue;
+        const b = this.shapeBounds(s);
+        if (!b) continue;
+        const txs = [b.x, b.x + b.w / 2, b.x + b.w];
+        if (txs.some((x) => Math.abs(x - bestX!.line) <= threshold)) {
+          s0 = Math.min(s0, b.y);
+          s1 = Math.max(s1, b.y + b.h);
+        }
+      }
+      guides.push({ axis: "x", pos: bestX.line, start: s0, end: s1 });
+    }
+
+    if (bestY) {
+      adjustY = bestY.adjust;
+      let s0 = minX;
+      let s1 = maxX;
+      for (const s of this.shapes.values()) {
+        if (this.selectedIds.has(s.id)) continue;
+        const b = this.shapeBounds(s);
+        if (!b) continue;
+        const tys = [b.y, b.y + b.h / 2, b.y + b.h];
+        if (tys.some((y) => Math.abs(y - bestY!.line) <= threshold)) {
+          s0 = Math.min(s0, b.x);
+          s1 = Math.max(s1, b.x + b.w);
+        }
+      }
+      guides.push({ axis: "y", pos: bestY.line, start: s0, end: s1 });
+    }
+
+    return { adjustX, adjustY, guides };
+  }
+
   private contentBounds(): {
     minX: number;
     minY: number;
@@ -1186,6 +1297,7 @@ export class CanvasEngine {
       if (s) this.drawSelection(ctx, s);
     }
     if (this.marquee) this.drawMarquee(ctx);
+    this.drawGuides(ctx);
 
     // Screen-space overlays.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1374,6 +1486,26 @@ export class CanvasEngine {
     ctx.lineWidth = 1 / this.scale;
     ctx.setLineDash([6 / this.scale, 4 / this.scale]);
     ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8);
+    ctx.restore();
+  }
+
+  private drawGuides(ctx: CanvasRenderingContext2D): void {
+    if (this.activeGuides.length === 0) return;
+    ctx.save();
+    ctx.strokeStyle = "#ff6bcb";
+    ctx.lineWidth = 1 / this.scale;
+    ctx.setLineDash([]);
+    for (const g of this.activeGuides) {
+      ctx.beginPath();
+      if (g.axis === "x") {
+        ctx.moveTo(g.pos, g.start);
+        ctx.lineTo(g.pos, g.end);
+      } else {
+        ctx.moveTo(g.start, g.pos);
+        ctx.lineTo(g.end, g.pos);
+      }
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
