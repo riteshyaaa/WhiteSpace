@@ -13,6 +13,15 @@ interface User {
 
 const users: User[] = [];
 
+// Ephemeral message types are relayed to the room but never persisted.
+const EPHEMERAL_TYPES = new Set([
+  "cursor",
+  "laser",
+  "reaction",
+  "cursor_chat",
+  "viewport",
+]);
+
 function checkUser(token: string): string | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -82,25 +91,16 @@ wss.on("connection", function connection(ws, request) {
       return;
     }
 
-    // Ephemeral live-cursor presence: broadcast to the room, never persisted.
-    if (parseData.type === "cursor") {
+    // Ephemeral presence/collaboration signals: relayed to the room, never persisted.
+    if (parseData.type && EPHEMERAL_TYPES.has(parseData.type)) {
       if (!roomId) return;
       const sender = users.find((x) => x.ws === ws);
       if (!sender || !sender.rooms.includes(roomId)) return;
 
+      const payload = JSON.stringify({ ...parseData, roomId, from: userId });
       users.forEach((u) => {
         if (u.ws !== ws && u.rooms.includes(roomId)) {
-          u.ws.send(
-            JSON.stringify({
-              type: "cursor",
-              roomId,
-              from: userId,
-              x: (parseData as { x?: number }).x,
-              y: (parseData as { y?: number }).y,
-              name: (parseData as { name?: string }).name,
-              color: (parseData as { color?: string }).color,
-            })
-          );
+          u.ws.send(payload);
         }
       });
       return;

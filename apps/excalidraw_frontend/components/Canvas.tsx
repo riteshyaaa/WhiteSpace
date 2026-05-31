@@ -21,6 +21,11 @@ import {
   Grid3x3,
   Magnet,
   Database,
+  Sparkles,
+  Smile,
+  MonitorPlay,
+  MessageSquare,
+  Eye,
 } from "lucide-react";
 import { CanvasEngine } from "@/draw/engine";
 import {
@@ -44,7 +49,10 @@ const TOOLS: { tool: Tool; icon: React.ReactNode; label: string; key: string }[]
     { tool: "text", icon: <Type size={18} />, label: "Text", key: "T" },
     { tool: "sticky", icon: <StickyNote size={18} />, label: "Sticky note", key: "S" },
     { tool: "eraser", icon: <Eraser size={18} />, label: "Eraser", key: "E" },
+    { tool: "laser", icon: <Sparkles size={18} />, label: "Laser pointer", key: "X" },
   ];
+
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "👀", "✅", "❓"];
 
 const STROKE_COLORS = ["#f8f9fa", "#ff6b6b", "#51cf66", "#4dabf7", "#ffd43b", "#cc5de8"];
 const FILL_COLORS = ["transparent", "#ff6b6b", "#51cf66", "#4dabf7", "#ffd43b", "#cc5de8"];
@@ -74,6 +82,10 @@ export default function Canvas({
   const [erdOpen, setErdOpen] = useState(false);
   const [schemaText, setSchemaText] = useState("");
   const [erdError, setErdError] = useState<string | null>(null);
+  const [presenting, setPresenting] = useState(false);
+  const [presenter, setPresenter] = useState<{ userId: string; name: string } | null>(null);
+  const [following, setFollowingState] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
 
   // Create the engine once per (room, socket).
   useEffect(() => {
@@ -93,6 +105,10 @@ export default function Canvas({
       onHistoryChange: (u, r) => {
         setCanUndo(u);
         setCanRedo(r);
+      },
+      onPresenterChange: (p) => {
+        setPresenter(p);
+        setFollowingState(engineRef.current?.isFollowing() ?? false);
       },
     });
     engineRef.current = engine;
@@ -142,6 +158,24 @@ export default function Canvas({
     } else {
       setErdError("No Prisma `model` blocks found. Paste a valid schema.prisma.");
     }
+  };
+
+  const togglePresenting = () => {
+    const next = !presenting;
+    setPresenting(next);
+    engineRef.current?.setPresenting(next);
+  };
+
+  const toggleFollow = () => {
+    if (!presenter) return;
+    const next = !following;
+    engineRef.current?.setFollowing(next ? presenter.userId : null);
+    setFollowingState(next);
+  };
+
+  const sendReaction = (emoji: string) => {
+    engineRef.current?.sendReaction(emoji);
+    setReactionsOpen(false);
   };
 
   return (
@@ -302,7 +336,39 @@ export default function Canvas({
         >
           <Database size={16} /> ERD
         </button>
+        <div className="mx-1 h-6 w-px bg-zinc-600" />
+        <button
+          title={presenting ? "Stop presenting" : "Present (broadcast your view)"}
+          onClick={togglePresenting}
+          className={`flex h-9 items-center gap-1 rounded-lg px-2 ${
+            presenting
+              ? "bg-blue-600 text-white"
+              : "text-zinc-300 hover:bg-zinc-700"
+          }`}
+        >
+          <MonitorPlay size={16} /> {presenting ? "Presenting" : "Present"}
+        </button>
       </div>
+
+      {/* Follow-presenter banner */}
+      {presenter && (
+        <div className="fixed left-1/2 top-16 z-[1200] flex -translate-x-1/2 items-center gap-3 rounded-xl bg-zinc-800/95 px-4 py-2 text-sm text-zinc-200 shadow-lg backdrop-blur">
+          <span className="flex items-center gap-1.5">
+            <MonitorPlay size={15} className="text-blue-400" />
+            <strong>{presenter.name}</strong> is presenting
+          </span>
+          <button
+            onClick={toggleFollow}
+            className={`flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-medium ${
+              following
+                ? "bg-blue-600 text-white"
+                : "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
+            }`}
+          >
+            <Eye size={14} /> {following ? "Following" : "Follow"}
+          </button>
+        </div>
+      )}
 
       {/* Zoom + canvas aids (bottom left) */}
       <div className="fixed bottom-3 left-3 flex items-center gap-1 rounded-xl bg-zinc-800/95 p-1.5 text-zinc-300 shadow-lg backdrop-blur">
@@ -352,6 +418,41 @@ export default function Canvas({
           }`}
         >
           <Magnet size={16} />
+        </button>
+      </div>
+
+      {/* Collaboration pill (bottom center) */}
+      <div className="fixed bottom-3 left-1/2 z-[1200] flex -translate-x-1/2 items-center gap-1 rounded-xl bg-zinc-800/95 p-1.5 text-zinc-300 shadow-lg backdrop-blur">
+        <div className="relative">
+          {reactionsOpen && (
+            <div className="absolute bottom-11 left-1/2 flex -translate-x-1/2 gap-1 rounded-xl bg-zinc-800 p-2 shadow-lg">
+              {REACTION_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  onClick={() => sendReaction(emoji)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-xl hover:bg-zinc-700"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            title="React"
+            onClick={() => setReactionsOpen((o) => !o)}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg hover:bg-zinc-700 ${
+              reactionsOpen ? "bg-zinc-700 text-white" : ""
+            }`}
+          >
+            <Smile size={16} />
+          </button>
+        </div>
+        <button
+          title="Cursor chat (press /)"
+          onClick={() => engineRef.current?.openCursorChat()}
+          className="flex h-8 items-center gap-1 rounded-lg px-2 text-xs hover:bg-zinc-700"
+        >
+          <MessageSquare size={15} /> Chat
         </button>
       </div>
 

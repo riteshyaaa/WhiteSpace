@@ -8,7 +8,8 @@ export type Tool =
   | "ellipse"
   | "text"
   | "sticky"
-  | "eraser";
+  | "eraser"
+  | "laser";
 
 export type StrokeStyle = "solid" | "dashed" | "dotted";
 
@@ -145,6 +146,23 @@ export interface RemoteCursor {
   x: number; // world coords
   y: number;
   lastSeen: number;
+  chat?: string; // ephemeral cursor-chat text
+  chatAt?: number;
+}
+
+export interface LaserPoint {
+  x: number;
+  y: number;
+  t: number; // timestamp for fade-out
+}
+
+export interface FloatingReaction {
+  id: string;
+  emoji: string;
+  x: number; // world coords
+  y: number;
+  start: number;
+  color: string;
 }
 
 export const DEFAULT_STYLE: Style = {
