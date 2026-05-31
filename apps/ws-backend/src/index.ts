@@ -82,6 +82,30 @@ wss.on("connection", function connection(ws, request) {
       return;
     }
 
+    // Ephemeral live-cursor presence: broadcast to the room, never persisted.
+    if (parseData.type === "cursor") {
+      if (!roomId) return;
+      const sender = users.find((x) => x.ws === ws);
+      if (!sender || !sender.rooms.includes(roomId)) return;
+
+      users.forEach((u) => {
+        if (u.ws !== ws && u.rooms.includes(roomId)) {
+          u.ws.send(
+            JSON.stringify({
+              type: "cursor",
+              roomId,
+              from: userId,
+              x: (parseData as { x?: number }).x,
+              y: (parseData as { y?: number }).y,
+              name: (parseData as { name?: string }).name,
+              color: (parseData as { color?: string }).color,
+            })
+          );
+        }
+      });
+      return;
+    }
+
     if (parseData.type === "chat") {
       if (!roomId) return;
       const message = parseData.message;
