@@ -9,12 +9,16 @@ import cors from "cors"
 
 
 const app = express();
-app.use(cors())
+
+// Restrict CORS to the configured frontend origin instead of allowing all.
+const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:3000";
+app.use(cors({ origin: allowedOrigin, credentials: true }));
+
 const PORT = 3001;
 
 app.use(express.json());
 
-app.post("/signup", async (req, res) => {
+app.post("/signup", signupLimiter, async (req, res) => {
   const parsed = UserSchema.safeParse(req.body);
   
   if (!parsed.success) {
@@ -77,8 +81,10 @@ app.post("/room", middleware, async (req, res) => {
     });
   }
 
-  //@ts-ignore
   const userId = req.userId;
+  if (!userId) {
+    return res.status(403).json({ message: "unauthorized" });
+  }
 
   //db call to create the Room
   try {
@@ -99,7 +105,7 @@ app.post("/room", middleware, async (req, res) => {
   }
 });
 
-app.get("/chat/:roomId", async (req, res) => {
+app.get("/chat/:roomId", middleware, async (req, res) => {
   const roomId = Number(req.params.roomId);
 
 
@@ -117,7 +123,7 @@ app.get("/chat/:roomId", async (req, res) => {
   })
 });
 
-app.get("/room/:slug", async(req, res) => {
+app.get("/room/:slug", middleware, async(req, res) => {
   const slug =  req.params.slug;
   
   const room =  await prisma.room.findFirst({

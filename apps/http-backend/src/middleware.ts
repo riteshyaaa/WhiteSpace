@@ -1,10 +1,20 @@
 import { NextFunction, Request, Response } from "express";
-import jwt from "jsonwebtoken"
+import jwt, { JwtPayload } from "jsonwebtoken";
 
 import { JWT_SECRET } from "@repo/backend-common/config";
 import rateLimit from "express-rate-limit";
 
-// Existing JWT middleware
+// Augment Express's Request so `req.userId` is typed (no more @ts-ignore).
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      userId?: string;
+    }
+  }
+}
+
+// JWT auth middleware
 export function middleware(req: Request, res: Response, next: NextFunction) {
   const token = req.headers["authorization"];
 
@@ -13,16 +23,15 @@ export function middleware(req: Request, res: Response, next: NextFunction) {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET)
-    //@ts-ignore
-    req.userId = decoded.userId;
+    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    req.userId = decoded.userId as string;
     next();
   } catch {
     return res.status(403).json({ message: "unauthorized" });
   }
 }
 
-// NEW: signup limiter
+// Signup rate limiter
 export const signupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,

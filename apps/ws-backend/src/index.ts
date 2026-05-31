@@ -1,5 +1,5 @@
 import { WebSocket, WebSocketServer } from "ws";
-import jwt, { JwtPayload } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "@repo/backend-common/config";
 import { prisma } from "@repo/db";
 
@@ -29,17 +29,6 @@ function checkUser(token: string): string | null {
 }
 
 wss.on("connection", function connection(ws, request) {
-  // const url = request.url;
-
-  // if (!url) {
-  //   return;
-  // }
-  // const queryParams = new URLSearchParams(url.split("?")[1]);
-  // const token = queryParams.get("token");
-  // if (!token) {
-  //   ws.close(1008, "Authentication token missing");
-  //   return;
-  // }
   const fullUrl = new URL(request.url!, "http://localhost:8081"); // base required
 
   const token = fullUrl.searchParams.get("token");
@@ -62,37 +51,47 @@ wss.on("connection", function connection(ws, request) {
   });
 
   ws.on("message", async function message(data) {
-    // if (typeof data !== String) {
-    //   return null;
-    // }
-
-    const parseData = JSON.parse(data as unknown as string); //{type: "join-room", roomid: 1}
-
-    if (parseData.type == "join_room") {
-      const user = users.find((x) => x.ws === ws);
-
-      user?.rooms.push(parseData.roomId);
+    let parseData: { type?: string; roomId?: unknown; message?: string };
+    try {
+      parseData = JSON.parse(data.toString());
+    } catch {
+      ws.send(
+        JSON.stringify({ type: "error", message: "Invalid message format" })
+      );
+      return;
     }
 
-    if (parseData.type == "leave_room") {
-      const user = users.find((x) => x.ws === ws);
+    // Normalize roomId to a string for all in-memory bookkeeping.
+    const roomId =
+      parseData.roomId != null ? String(parseData.roomId) : undefined;
 
+    if (parseData.type === "join_room") {
+      if (!roomId) return;
+      const user = users.find((x) => x.ws === ws);
+      if (user && !user.rooms.includes(roomId)) {
+        user.rooms.push(roomId);
+      }
+      return;
+    }
+
+    if (parseData.type === "leave_room") {
+      if (!roomId) return;
+      const user = users.find((x) => x.ws === ws);
       if (!user) return;
-
-      user.rooms = user.rooms.filter((roomId) => roomId !== parseData.roomId);
+      user.rooms = user.rooms.filter((r) => r !== roomId);
+      return;
     }
 
-    if (parseData.type == "chat") {
-      const roomId = parseData.roomId;
+    if (parseData.type === "chat") {
+      if (!roomId) return;
       const message = parseData.message;
+      if (typeof message !== "string") return;
 
       const user = users.find((x) => x.ws === ws);
-
       if (!user) return;
 
       // Check if user is in that room
-
-      if (!user.rooms.includes(parseData.roomId)) {
+      if (!user.rooms.includes(roomId)) {
         ws.send(
           JSON.stringify({
             type: "error",
@@ -102,27 +101,47 @@ wss.on("connection", function connection(ws, request) {
         return;
       }
 
-      await prisma.chat.create({
-        data: {
-          roomId: Number(roomId),
-          message,
-          userId,
-        },
-      });
+      try {
+        await prisma.chat.create({
+          data: {
+            roomId: Number(roomId),
+            message,
+            userId,
+          },
+        });
+      } catch (err) {
+        console.error("Failed to persist chat message", err);
+        ws.send(
+          JSON.stringify({ type: "error", message: "Failed to save message" })
+        );
+        return;
+      }
 
-      //send message to everyone who are in that room
+      // Send message to everyone who is in that room
       users.forEach((u) => {
-        if (u.rooms.includes(parseData.roomId)) {
+        if (u.rooms.includes(roomId)) {
           u.ws.send(
             JSON.stringify({
               type: "chat",
-              roomId: roomId,
+              roomId,
               from: userId,
-              message: message,
+              message,
             })
           );
         }
       });
     }
+  });
+
+  // Clean up on disconnect so we don't leak users or broadcast to dead sockets.
+  ws.on("close", function close() {
+    const index = users.findIndex((x) => x.ws === ws);
+    if (index !== -1) {
+      users.splice(index, 1);
+    }
+  });
+
+  ws.on("error", function error(err) {
+    console.error("WebSocket error", err);
   });
 });

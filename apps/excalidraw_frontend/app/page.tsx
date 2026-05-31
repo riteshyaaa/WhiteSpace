@@ -9,7 +9,7 @@ function App() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-2">
               <Pencil className="w-8 h-8 text-blue-600" />
-              <span className="text-2xl font-bold text-gray-900">DailyDraw</span>
+              <span className="text-2xl font-bold text-gray-900">WhiteSpace</span>
             </div>
             <div className="hidden md:flex items-center space-x-8">
               <a href="#features" className="text-gray-600 hover:text-gray-900 transition">Features</a>
@@ -38,12 +38,16 @@ function App() {
                 Collaborative, end-to-end encrypted, and open source.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                <button className="bg-blue-600 text-white px-8 py-4 rounded-lg hover:bg-blue-700 transition font-medium text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all">
-                  Start Drawing Now
-                </button>
-                <button className="bg-white text-gray-900 px-8 py-4 rounded-lg hover:bg-gray-50 transition font-medium text-lg border-2 border-gray-200 hover:border-gray-300">
-                  View Examples
-                </button>
+                <Link href="/signup">
+                  <button className="bg-blue-600 text-white px-8 py-4 rounded-lg hover:bg-blue-700 transition font-medium text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all">
+                    Start Drawing Now
+                  </button>
+                </Link>
+                <a href="#features">
+                  <button className="bg-white text-gray-900 px-8 py-4 rounded-lg hover:bg-gray-50 transition font-medium text-lg border-2 border-gray-200 hover:border-gray-300">
+                    View Examples
+                  </button>
+                </a>
               </div>
             </div>
 
@@ -184,7 +188,7 @@ function App() {
                   Built for designers, developers, and thinkers
                 </h2>
                 <p className="text-lg text-gray-600 mb-6">
-                  Excalidraw is an open source virtual whiteboard that lets you easily sketch diagrams
+                  WhiteSpace is an open source virtual whiteboard that lets you easily sketch diagrams
                   with a hand-drawn feel. Perfect for wireframes, flowcharts, system designs, and brainstorming.
                 </p>
                 <p className="text-lg text-gray-600 mb-8">
@@ -192,9 +196,11 @@ function App() {
                   and bring concepts to life.
                 </p>
               
-                <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition font-medium">
-                  Get Started Free
-                </button>
+                <Link href="/signup">
+                  <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition font-medium">
+                    Get Started Free
+                  </button>
+                </Link>
                
               </div>
               <div className="grid grid-cols-2 gap-6">
@@ -225,11 +231,13 @@ function App() {
               Ready to start sketching?
             </h2>
             <p className="text-xl text-blue-100 mb-10 max-w-2xl mx-auto">
-              Join millions of users who trust Excalidraw for their visual thinking needs
+              Join millions of users who trust WhiteSpace for their visual thinking needs
             </p>
-            <button className="bg-white text-blue-600 px-8 py-4 rounded-lg hover:bg-gray-100 transition font-medium text-lg shadow-lg">
-              Launch Excalidraw
-            </button>
+            <Link href="/signup">
+              <button className="bg-white text-blue-600 px-8 py-4 rounded-lg hover:bg-gray-100 transition font-medium text-lg shadow-lg">
+                Launch WhiteSpace
+              </button>
+            </Link>
           </div>
         </section>
       </main>
@@ -240,7 +248,7 @@ function App() {
             <div>
               <div className="flex items-center space-x-2 mb-4">
                 <Pencil className="w-6 h-6 text-blue-400" />
-                <span className="text-xl font-bold text-white">Excalidraw</span>
+                <span className="text-xl font-bold text-white">WhiteSpace</span>
               </div>
               <p className="text-sm">
                 Virtual whiteboard for sketching hand-drawn like diagrams
@@ -275,7 +283,7 @@ function App() {
             </div>
           </div>
           <div className="border-t border-gray-800 mt-12 pt-8 text-sm text-center">
-            <p>&copy; 2024 Excalidraw. Open source and free forever.</p>
+            <p>&copy; 2026 WhiteSpace. Open source and free forever.</p>
           </div>
         </div>
       </footer>
