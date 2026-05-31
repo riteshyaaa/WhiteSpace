@@ -73,6 +73,24 @@ app.post("/signin", async (req, res) => {
   res.json({ token });
 });
 
+app.get("/me", middleware, async (req, res) => {
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(403).json({ message: "unauthorized" });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, email: true },
+  });
+
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  res.json({ user });
+});
+
 app.post("/room", middleware, async (req, res) => {
   const parse = RoomSchema.safeParse(req.body);
   if (!parse.success) {
@@ -114,9 +132,9 @@ app.get("/chat/:roomId", middleware, async (req, res) => {
       roomId,
     },
     orderBy: {
-      id: "desc",
+      id: "asc",
     },
-    take: 50,
+    take: 2000,
   });
   res.json({
     messages
