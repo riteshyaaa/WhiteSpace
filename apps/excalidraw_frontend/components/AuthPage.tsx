@@ -28,7 +28,7 @@ export function AuthPage({ isSignin }: { isSignin: boolean }) {
           password,
         });
         setToken(res.data.token);
-        router.push("/");
+        router.push("/dashboard");
       } else {
         await axios.post(`${BACKEND_URL}/signup`, {
           name,
