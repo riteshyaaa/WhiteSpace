@@ -26,6 +26,7 @@ import {
   MonitorPlay,
   MessageSquare,
   Eye,
+  LayoutGrid,
 } from "lucide-react";
 import { CanvasEngine } from "@/draw/engine";
 import {
@@ -181,6 +182,15 @@ export default function Canvas({
   return (
     <div style={{ height: "100vh", overflow: "hidden", position: "relative" }}>
       <canvas ref={canvasRef} style={{ display: "block" }} />
+
+      {/* Back to dashboard */}
+      <a
+        href="/dashboard"
+        title="Back to boards"
+        className="fixed left-3 top-3 z-[1200] flex h-9 items-center gap-1 rounded-xl bg-zinc-800/95 px-3 text-sm text-zinc-300 shadow-lg backdrop-blur hover:bg-zinc-700"
+      >
+        <LayoutGrid size={16} /> Boards
+      </a>
 
       {/* Tool palette */}
       <div className="fixed left-1/2 top-3 -translate-x-1/2 flex items-center gap-1 rounded-xl bg-zinc-800/95 p-1.5 shadow-lg backdrop-blur">

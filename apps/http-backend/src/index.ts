@@ -91,12 +91,21 @@ app.get("/me", middleware, async (req, res) => {
   res.json({ user });
 });
 
+function slugify(name: string): string {
+  const base = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${base || "board"}-${suffix}`;
+}
+
 app.post("/room", middleware, async (req, res) => {
   const parse = RoomSchema.safeParse(req.body);
   if (!parse.success) {
-    return res.json({
-      message: "Invalid inputs",
-    });
+    return res.status(400).json({ message: "Invalid inputs" });
   }
 
   const userId = req.userId;
@@ -104,23 +113,57 @@ app.post("/room", middleware, async (req, res) => {
     return res.status(403).json({ message: "unauthorized" });
   }
 
-  //db call to create the Room
-  try {
-    const room = await prisma.room.create({
-      data: {
-        slug: parse.data.name,
-        adminId: userId,
-      },
-    });
-
-    res.status(201).json({ roomId: room.id });
-  } catch (e: any) {
-    if (e.code === "P2002") {
-      return res.status(409).json({ message: "Room already exists" });
+  // Generate a unique slug, retrying on the rare collision.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const room = await prisma.room.create({
+        data: {
+          slug: slugify(parse.data.name),
+          name: parse.data.name,
+          adminId: userId,
+        },
+      });
+      return res.status(201).json({ roomId: room.id, slug: room.slug });
+    } catch (e: any) {
+      if (e.code === "P2002") continue; // slug clash — try again
+      console.error(e);
+      return res.status(500).json({ message: "Internal server error" });
     }
-    console.error(e);
-    res.status(500).json({ message: "Internal server error" });
   }
+  return res.status(409).json({ message: "Could not generate a unique board" });
+});
+
+app.get("/rooms", middleware, async (req, res) => {
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(403).json({ message: "unauthorized" });
+  }
+  const rooms = await prisma.room.findMany({
+    where: { adminId: userId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, slug: true, name: true, createdAt: true },
+  });
+  res.json({ rooms });
+});
+
+app.delete("/room/:id", middleware, async (req, res) => {
+  const userId = req.userId;
+  if (!userId) {
+    return res.status(403).json({ message: "unauthorized" });
+  }
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ message: "Invalid id" });
+  }
+  const room = await prisma.room.findUnique({ where: { id } });
+  if (!room) {
+    return res.status(404).json({ message: "Board not found" });
+  }
+  if (room.adminId !== userId) {
+    return res.status(403).json({ message: "Not your board" });
+  }
+  await prisma.room.delete({ where: { id } });
+  res.status(204).end();
 });
 
 app.get("/chat/:roomId", middleware, async (req, res) => {
