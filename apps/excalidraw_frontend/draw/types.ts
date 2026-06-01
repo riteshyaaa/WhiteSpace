@@ -175,3 +175,34 @@ export const DEFAULT_STYLE: Style = {
 
 export const STICKY_DEFAULT_FILL = "#ffd43b";
 export const GRID_SIZE = 20;
+
+
+export type ThemeName = "dark" | "light" | "contrast";
+
+export interface Theme {
+  canvasBg: string;
+  gridColor: string;
+  dotColor: string;
+  defaultStroke: string;
+}
+
+export const THEMES: Record<ThemeName, Theme> = {
+  dark: {
+    canvasBg: "#121212",
+    gridColor: "rgba(255,255,255,0.05)",
+    dotColor: "rgba(255,255,255,0.12)",
+    defaultStroke: "#f8f9fa",
+  },
+  light: {
+    canvasBg: "#ffffff",
+    gridColor: "rgba(0,0,0,0.06)",
+    dotColor: "rgba(0,0,0,0.16)",
+    defaultStroke: "#1e1e1e",
+  },
+  contrast: {
+    canvasBg: "#000000",
+    gridColor: "rgba(255,255,255,0.22)",
+    dotColor: "rgba(255,255,255,0.4)",
+    defaultStroke: "#ffffff",
+  },
+};
