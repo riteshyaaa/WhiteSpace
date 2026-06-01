@@ -27,6 +27,10 @@ import {
   MessageSquare,
   Eye,
   LayoutGrid,
+  Command as CommandIcon,
+  Sun,
+  Moon,
+  Contrast,
 } from "lucide-react";
 import { CanvasEngine } from "@/draw/engine";
 import {
@@ -34,9 +38,12 @@ import {
   DEFAULT_STYLE,
   Style,
   StrokeStyle,
+  ThemeName,
+  THEMES,
   Tool,
 } from "@/draw/types";
 import { getMe, colorFromId } from "@/lib/user";
+import { CommandPalette, Command } from "./CommandPalette";
 
 const TOOLS: { tool: Tool; icon: React.ReactNode; label: string; key: string }[] =
   [
@@ -87,6 +94,12 @@ export default function Canvas({
   const [presenter, setPresenter] = useState<{ userId: string; name: string } | null>(null);
   const [following, setFollowingState] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeName>(() => {
+    if (typeof window === "undefined") return "dark";
+    return (window.localStorage.getItem("ws_theme") as ThemeName) || "dark";
+  });
+  const prevThemeRef = useRef<ThemeName>("dark");
 
   // Create the engine once per (room, socket).
   useEffect(() => {
@@ -115,6 +128,7 @@ export default function Canvas({
     engineRef.current = engine;
     engine.setBackground(background);
     engine.setSnapToGrid(snap);
+    engine.setTheme(theme);
     engine.init();
 
     getMe().then((me) => {
@@ -145,6 +159,38 @@ export default function Canvas({
   useEffect(() => {
     engineRef.current?.setSnapToGrid(snap);
   }, [snap]);
+
+  // Apply theme; adapt the default stroke color so new shapes stay visible.
+  useEffect(() => {
+    engineRef.current?.setTheme(theme);
+    const prev = prevThemeRef.current;
+    if (prev !== theme) {
+      setStyle((s) =>
+        s.stroke === THEMES[prev].defaultStroke
+          ? { ...s, stroke: THEMES[theme].defaultStroke }
+          : s
+      );
+      prevThemeRef.current = theme;
+    }
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("ws_theme", theme);
+    }
+  }, [theme]);
+
+  // Command palette: Cmd/Ctrl-K toggles it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const cycleTheme = () =>
+    setTheme((t) => (t === "dark" ? "light" : t === "light" ? "contrast" : "dark"));
 
   const cycleBackground = () => {
     setBackground((b) => (b === "dots" ? "grid" : b === "grid" ? "blank" : "dots"));
@@ -179,9 +225,53 @@ export default function Canvas({
     setReactionsOpen(false);
   };
 
+  const e = () => engineRef.current;
+  const commands: Command[] = [
+    ...TOOLS.map((t) => ({
+      id: `tool-${t.tool}`,
+      group: "Tool",
+      label: t.label,
+      hint: t.key,
+      keywords: "tool draw",
+      run: () => setTool(t.tool),
+    })),
+    { id: "undo", group: "Edit", label: "Undo", hint: "Ctrl+Z", run: () => e()?.undo() },
+    { id: "redo", group: "Edit", label: "Redo", hint: "Ctrl+Shift+Z", run: () => e()?.redo() },
+    { id: "selectAll", group: "Edit", label: "Select all", hint: "Ctrl+A", run: () => e()?.selectAll() },
+    { id: "duplicate", group: "Edit", label: "Duplicate selection", hint: "Ctrl+D", run: () => e()?.duplicate() },
+    { id: "delete", group: "Edit", label: "Delete selection", hint: "Del", run: () => e()?.deleteSelected() },
+    { id: "zoomIn", group: "View", label: "Zoom in", run: () => e()?.zoomIn() },
+    { id: "zoomOut", group: "View", label: "Zoom out", run: () => e()?.zoomOut() },
+    { id: "zoomReset", group: "View", label: "Reset zoom", run: () => e()?.resetView() },
+    { id: "zoomFit", group: "View", label: "Fit to content", run: () => e()?.zoomToFit() },
+    { id: "bg", group: "View", label: "Cycle background (blank/grid/dots)", run: cycleBackground },
+    { id: "snap", group: "View", label: "Toggle snap to grid", keywords: "magnet", run: () => setSnap((s) => !s) },
+    { id: "theme-dark", group: "Theme", label: "Theme: Dark", run: () => setTheme("dark") },
+    { id: "theme-light", group: "Theme", label: "Theme: Light", run: () => setTheme("light") },
+    { id: "theme-contrast", group: "Theme", label: "Theme: High contrast", keywords: "accessibility a11y", run: () => setTheme("contrast") },
+    { id: "png", group: "Export", label: "Export as PNG", run: () => e()?.exportPNG() },
+    { id: "svg", group: "Export", label: "Export as SVG", run: () => e()?.exportSVG() },
+    { id: "erd", group: "Insert", label: "Generate ERD from Prisma schema", keywords: "database diagram", run: () => setErdOpen(true) },
+    { id: "present", group: "Collab", label: presenting ? "Stop presenting" : "Present (broadcast view)", run: togglePresenting },
+    { id: "chat", group: "Collab", label: "Cursor chat", hint: "/", run: () => e()?.openCursorChat() },
+    { id: "react", group: "Collab", label: "React with emoji", run: () => setReactionsOpen(true) },
+  ];
+
   return (
     <div style={{ height: "100vh", overflow: "hidden", position: "relative" }}>
-      <canvas ref={canvasRef} style={{ display: "block" }} />
+      <canvas
+        ref={canvasRef}
+        style={{ display: "block" }}
+        aria-label="Whiteboard canvas"
+        role="img"
+      />
+
+      {/* Command palette */}
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+      />
 
       {/* Back to dashboard */}
       <a
@@ -193,11 +283,17 @@ export default function Canvas({
       </a>
 
       {/* Tool palette */}
-      <div className="fixed left-1/2 top-3 -translate-x-1/2 flex items-center gap-1 rounded-xl bg-zinc-800/95 p-1.5 shadow-lg backdrop-blur">
+      <div
+        role="toolbar"
+        aria-label="Drawing tools"
+        className="fixed left-1/2 top-3 -translate-x-1/2 flex items-center gap-1 rounded-xl bg-zinc-800/95 p-1.5 shadow-lg backdrop-blur"
+      >
         {TOOLS.map((t) => (
           <button
             key={t.tool}
             title={`${t.label} (${t.key})`}
+            aria-label={t.label}
+            aria-pressed={tool === t.tool}
             onClick={() => setTool(t.tool)}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition ${
               tool === t.tool
@@ -357,6 +453,29 @@ export default function Canvas({
           }`}
         >
           <MonitorPlay size={16} /> {presenting ? "Presenting" : "Present"}
+        </button>
+        <div className="mx-1 h-6 w-px bg-zinc-600" />
+        <button
+          aria-label={`Theme: ${theme}. Click to change.`}
+          title={`Theme: ${theme} (click to cycle)`}
+          onClick={cycleTheme}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 hover:bg-zinc-700"
+        >
+          {theme === "dark" ? (
+            <Moon size={18} />
+          ) : theme === "light" ? (
+            <Sun size={18} />
+          ) : (
+            <Contrast size={18} />
+          )}
+        </button>
+        <button
+          aria-label="Open command palette"
+          title="Command palette (Ctrl/Cmd+K)"
+          onClick={() => setPaletteOpen(true)}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 hover:bg-zinc-700"
+        >
+          <CommandIcon size={18} />
         </button>
       </div>
 

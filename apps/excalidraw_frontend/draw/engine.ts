@@ -15,6 +15,9 @@ import {
   STICKY_DEFAULT_FILL,
   StrokeStyle,
   Style,
+  Theme,
+  ThemeName,
+  THEMES,
   Tool,
 } from "./types";
 import { parsePrismaSchema, schemaToShapes } from "./erd";
@@ -81,6 +84,7 @@ export class CanvasEngine {
 
   private background: BackgroundMode = "dots";
   private snapToGrid = false;
+  private theme: Theme = THEMES.dark;
 
   private undoStack: HistoryEntry[] = [];
   private redoStack: HistoryEntry[] = [];
@@ -213,6 +217,16 @@ export class CanvasEngine {
   setBackground(mode: BackgroundMode): void {
     this.background = mode;
     this.render();
+  }
+
+  setTheme(name: ThemeName): void {
+    this.theme = THEMES[name];
+    this.render();
+  }
+
+  /** The default stroke color for a theme (so the UI can adapt new-shape color). */
+  static themeStroke(name: ThemeName): string {
+    return THEMES[name].defaultStroke;
   }
 
   setSnapToGrid(on: boolean): void {
@@ -1645,7 +1659,7 @@ export class CanvasEngine {
   render(): void {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#121212";
+    ctx.fillStyle = this.theme.canvasBg;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     this.drawBackground(ctx);
 
@@ -1733,7 +1747,7 @@ export class CanvasEngine {
     const { width, height } = this.canvas;
 
     if (this.background === "grid") {
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.strokeStyle = this.theme.gridColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
       for (let x = startX; x < width; x += step) {
@@ -1746,7 +1760,7 @@ export class CanvasEngine {
       }
       ctx.stroke();
     } else {
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillStyle = this.theme.dotColor;
       for (let x = startX; x < width; x += step) {
         for (let y = startY; y < height; y += step) {
           ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
@@ -2217,7 +2231,7 @@ export class CanvasEngine {
     off.height = Math.max(1, Math.ceil(height));
     const octx = off.getContext("2d");
     if (!octx) return;
-    octx.fillStyle = "#121212";
+    octx.fillStyle = this.theme.canvasBg;
     octx.fillRect(0, 0, off.width, off.height);
     octx.setTransform(1, 0, 0, 1, -minX, -minY);
     for (const s of this.shapes.values()) this.drawShape(octx, s);
@@ -2244,7 +2258,7 @@ export class CanvasEngine {
       width
     )} ${Math.ceil(height)}"><rect x="${minX}" y="${minY}" width="${Math.ceil(
       width
-    )}" height="${Math.ceil(height)}" fill="#121212"/>${parts.join("")}</svg>`;
+    )}" height="${Math.ceil(height)}" fill="${this.theme.canvasBg}"/>${parts.join("")}</svg>`;
 
     const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     this.triggerDownload(url, "whitespace-board.svg");
